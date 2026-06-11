@@ -305,7 +305,7 @@ with st.sidebar:
 # ============================================================
 # 6. MAIN CONTENT
 # ============================================================
-
+gemini_key = st.session_state.get("api_key_input", "")
 # ── STEP 1: SPY TRENDING ──────────────────────────────────
 if menu == STEPS[0]:
     st.markdown(
