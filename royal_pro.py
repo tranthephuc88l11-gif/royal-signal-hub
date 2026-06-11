@@ -72,7 +72,7 @@ def call_ai(prompt: str) -> str:
         return "❌ MISSING API KEY"
     genai.configure(api_key=key)
     try:
-        model = genai.GenerativeModel("gemini-3-flash-preview")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         return model.generate_content(prompt).text
     except Exception as e:
         return f"❌ Gemini Error: {e}"
@@ -386,17 +386,20 @@ Transcript: {st.session_state.selected_transcript[:3500]}
                 )
 
             if write_btn:
-                outline_ref = st.session_state.outline[:1500]
                 prompt_w = f"""
-OUTLINE REFERENCE (summary):
-{outline_ref}
+You are a master YouTube scriptwriter specializing in royal drama and high-retention content.
 
-TASK: Write PART {curr} of the script — ENGLISH ONLY.
+FULL OUTLINE:
+{st.session_state.outline}
 
-STRICT REQUIREMENTS:
-1. WORD COUNT — write approximately 800 words for this part. Expand with deep analysis and dramatic storytelling.
-2. NO DIGITS — write all numbers as words (e.g. 'twenty-twenty-five' not 2025).
-3. STYLE — cinematic, high-stakes drama, authoritative tone.
+TASK: Write PART {curr} of 6 for the script about: "{st.session_state.selected_topic}"
+
+REQUIREMENTS:
+1. Write ONLY Part {curr} — do not write other parts.
+2. Follow the word count assigned to Part {curr} in the outline above (around 800 words).
+3. NO DIGITS — all numbers must be written as words (e.g. 'twenty-twenty-five' not 2025).
+4. ENGLISH ONLY.
+5. Style: cinematic, dramatic, high-stakes storytelling.
 """
                 with st.spinner(f"Writing Part {curr}..."):
                     result = call_ai(prompt_w)
