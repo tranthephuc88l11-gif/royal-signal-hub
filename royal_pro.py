@@ -386,14 +386,15 @@ Transcript: {st.session_state.selected_transcript[:3500]}
                 )
 
             if write_btn:
+                outline_ref = st.session_state.outline[:1500]
                 prompt_w = f"""
-OUTLINE REFERENCE:
-{st.session_state.outline}
+OUTLINE REFERENCE (summary):
+{outline_ref}
 
 TASK: Write PART {curr} of the script — ENGLISH ONLY.
 
 STRICT REQUIREMENTS:
-1. WORD COUNT — match the word count allocated for Part {curr} in the outline exactly.
+1. WORD COUNT — write approximately 800 words for this part. Expand with deep analysis and dramatic storytelling.
 2. NO DIGITS — write all numbers as words (e.g. 'twenty-twenty-five' not 2025).
 3. STYLE — cinematic, high-stakes drama, authoritative tone.
 """
