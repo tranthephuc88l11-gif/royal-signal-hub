@@ -72,7 +72,7 @@ def call_ai(prompt: str) -> str:
         return "❌ MISSING API KEY"
     genai.configure(api_key=key)
     try:
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
         return model.generate_content(prompt).text
     except Exception as e:
         return f"❌ Gemini Error: {e}"
