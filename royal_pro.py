@@ -400,6 +400,7 @@ REQUIREMENTS:
 3. NO DIGITS — all numbers must be written as words (e.g. 'twenty-twenty-five' not 2025).
 4. ENGLISH ONLY.
 5. Style: cinematic, dramatic, high-stakes storytelling.
+6. PURE NARRATION ONLY — no image suggestions, no B-roll notes, no [visual], no [cut to], no stage directions, no brackets of any kind. Just the spoken script text.
 """
                 with st.spinner(f"Writing Part {curr}..."):
                     result = call_ai(prompt_w)
