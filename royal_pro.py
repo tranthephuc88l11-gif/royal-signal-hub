@@ -6,10 +6,9 @@ import yt_dlp
 from datetime import datetime, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# --- 1. CẤU HÌNH HỆ THỐNG LƯU TRỮ THEO THƯ MỤC MẸ ---
+# --- 1. CẤU HÌNH HỆ THỐNG LƯU TRỮ (FIX LỖI STREAMLIT CLOUD) ---
 BASE_DATABASE = "production_database"
-if not os.path.exists(BASE_DATABASE):
-    os.makedirs(BASE_DATABASE)
+os.makedirs(BASE_DATABASE, exist_ok=True)
 
 TOPIC_CONFIG = {
     "👑 ROYAL NEWS": {
@@ -50,13 +49,12 @@ init_session()
 # --- 3. CÁC HÀM TIỆN ÍCH HỆ THỐNG ---
 def get_topic_path(cat):
     path = os.path.join(BASE_DATABASE, TOPIC_CONFIG[cat]["folder"])
-    if not os.path.exists(path):
-        os.makedirs(path)
+    os.makedirs(path, exist_ok=True)
     return path
 
-def call_gemini_3(prompt, key):
-    """CHỈ SỬ DỤNG GEMINI 3 FLASH PREVIEW - KHÔNG FALLBACK"""
-    if not key: return "VUI LÒNG NHẬP API KEY"
+def call_ai(prompt, key):
+    """SỬ DỤNG DUY NHẤT GEMINI 3 FLASH PREVIEW"""
+    if not key: return "MISSING API KEY"
     genai.configure(api_key=key)
     try:
         model = genai.GenerativeModel('gemini-3-flash-preview')
@@ -95,24 +93,24 @@ def get_ts_safe(v_id):
     except: return ""
 
 # --- 4. GIAO DIỆN STREAMLIT ---
-st.set_page_config(page_title="Production Hub Pro V20", page_icon="👑", layout="wide")
+st.set_page_config(page_title="AI Production Hub Pro V24", page_icon="👑", layout="wide")
 
 with st.sidebar:
     st.title("👑 PRODUCTION HUB")
-    gemini_key = st.text_input("Gemini API Key (AIza...):", type="password")
+    gemini_key = st.text_input("Gemini API Key:", type="password", key="api_key_input")
     
     st.divider()
-    # CHỦ ĐỀ MẸ
-    main_cat = st.selectbox("📂 THƯ MỤC MẸ (CATEGORY):", list(TOPIC_CONFIG.keys()))
+    # THƯ MỤC MẸ
+    main_cat = st.selectbox("📂 THƯ MỤC MẸ (CATEGORY):", list(TOPIC_CONFIG.keys()), key="cat_box")
     
     st.divider()
     # QUY TRÌNH CON
     st.write("**QUY TRÌNH LÀM VIỆC:**")
     menu = st.radio("Chọn bước:", 
                     ["1. TÌM TRENDING (SPY)", 
-                     "2. VIẾT LẠI KỊCH BẢN (REWRITE)", 
+                     "2. VIẾT LẠI KỊCH BẢN", 
                      "3. SEO & THUMBNAIL HOÀNG GIA", 
-                     "4. 📜 LỊCH SỬ KỊCH BẢN"], label_visibility="collapsed")
+                     "4. 📜 LỊCH SỬ KỊCH BẢN"], key="menu_radio")
     
     st.divider()
     if st.button("➕ RESET DỰ ÁN MỚI"):
@@ -145,31 +143,36 @@ if menu == "1. TÌM TRENDING (SPY)":
                     st.success("Đã nạp video! Chuyển qua Bước 2.")
 
 # --- MENU 2: VIẾT LẠI KỊCH BẢN ---
-elif menu == "2. VIẾT LẠI KỊCH BẢN (REWRITE)":
-    st.header(f"✍️ {main_cat}: Rewrite Master (Gemini 3 Only)")
-    t_name = st.text_input("Project Name:", value=st.session_state.selected_topic)
-    st.session_state.selected_topic = t_name
-    t_script = st.text_area("Lời thoại gốc:", value=st.session_state.selected_transcript, height=200)
-    st.session_state.selected_transcript = t_script
+elif menu == "2. VIẾT LẠI KỊCH BẢN":
+    st.header(f"✍️ {main_cat}: Rewrite Master (5000 Words - Gemini 3)")
+    
+    # LUÔN HIỆN CÁC Ô NHẬP LIỆU
+    st.session_state.selected_topic = st.text_input("Project Name:", value=st.session_state.selected_topic)
+    st.session_state.selected_transcript = st.text_area("Original Transcript:", value=st.session_state.selected_transcript, height=200)
+
+    st.divider()
 
     if st.session_state.outline is None:
         if st.button("BƯỚC 1: LÊN DÀN Ý & PHÂN BỔ SỐ TỪ"):
-            if not gemini_key or not t_script: st.error("Nhập Key và Lời thoại!")
+            if not gemini_key or not st.session_state.selected_transcript: 
+                st.error("Thiếu Key hoặc Transcript!")
             else:
                 prompt_o = f"""
-                PLAY THE ROLE OF A REAL CONTENT CREATOR WITH YEARS OF EXPERIENCE, A MASTER OF HIGH-LEVEL RETENTION SCRIPTS.
+                ACT AS A MASTER CONTENT CREATOR (Master of high-level retention).
                 Task: Create a detailed OUTLINE to REWRITE this script into a 5000-word viral YouTube script.
+                Category: {main_cat}
                 
                 STRICT RULES FOR OUTLINE:
                 1. DIVIDE INTO EXACTLY SIX PARTS.
-                2. ASSIGN A SPECIFIC WORD COUNT PER PART (Total 5000 words).
-                3. NUMERICAL RULE: NO DIGITS AT ALL. Write all numbers as words (e.g. 'one-hundred' not 100).
+                2. ASSIGN A SPECIFIC WORD COUNT PER PART (Total must reach 5000 words).
+                3. NUMERICAL RULE: NO DIGITS AT ALL. (Example: 'three' not 3).
                 4. LANGUAGE: ENGLISH ONLY.
                 
-                Topic: {t_name} | Script Source: {t_script[:3500]}
+                Topic: {st.session_state.selected_topic}
+                Transcript: {st.session_state.selected_transcript[:3500]}
                 """
                 with st.spinner("Gemini 3 đang phân bổ số từ..."):
-                    res = call_gemini_3(prompt_o, gemini_key)
+                    res = call_ai(prompt_o, gemini_key)
                     if "❌" not in res:
                         st.session_state.outline = res
                         st.session_state.current_part = 1
@@ -177,7 +180,7 @@ elif menu == "2. VIẾT LẠI KỊCH BẢN (REWRITE)":
                     else: st.error(res)
     else:
         st.info(f"Dự án: {st.session_state.selected_topic} (Phần {st.session_state.current_part}/6)")
-        with st.expander("Xem Dàn Ý Chi Tiết"): st.markdown(st.session_state.outline)
+        with st.expander("📋 Xem Dàn Ý Chi Tiết", expanded=True): st.markdown(st.session_state.outline)
         
         if st.session_state.current_part <= 6:
             if st.button(f"VIẾT TIẾP PHẦN {st.session_state.current_part} (BÁM SÁT SỐ TỪ)"):
@@ -186,12 +189,12 @@ elif menu == "2. VIẾT LẠI KỊCH BẢN (REWRITE)":
                 TASK: Write PART {st.session_state.current_part} of the script in ENGLISH ONLY. 
                 
                 STRICT REQUIREMENTS:
-                1. WORD COUNT: Refer to the outline. You MUST write this part to reach the specific word count allocated. Expand deeply.
+                1. WORD COUNT: Refer to the outline above. Write deeply to reach the word count allocated for this part.
                 2. NO DIGITS: ABSOLUTELY NO NUMBERS AS DIGITS. (Example: 'twenty-twenty-four' not 2024).
-                3. STYLE: Dramatic storytelling, royal scandal, high retention.
+                3. STYLE: Dramatic, high-stakes storytelling, Royal expert tone.
                 """
                 with st.spinner(f"Gemini 3 đang viết phần {st.session_state.current_part}..."):
-                    res_part = call_gemini_3(prompt_w, gemini_key)
+                    res_part = call_ai(prompt_w, gemini_key)
                     if "❌" not in res_part:
                         st.session_state.full_script_list.append(f"## PART {st.session_state.current_part}\n\n{res_part}")
                         if st.session_state.current_part == 6:
@@ -199,31 +202,31 @@ elif menu == "2. VIẾT LẠI KỊCH BẢN (REWRITE)":
                             path = get_topic_path(main_cat)
                             f_name = f"{path}/{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
                             with open(f_name, 'w', encoding='utf-8') as f:
-                                json.dump({"date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "topic": t_name, "content": "\n\n".join(st.session_state.full_script_list)}, f, ensure_ascii=False, indent=4)
+                                json.dump({"date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "topic": st.session_state.selected_topic, "content": "\n\n".join(st.session_state.full_script_list)}, f, ensure_ascii=False, indent=4)
                         st.session_state.current_part += 1
                         st.rerun()
                     else: st.error(res_part)
-        
+
         for p in st.session_state.full_script_list: st.markdown(p); st.divider()
         if st.session_state.current_part > 6:
-            st.success("✅ Kịch bản hoàn thành!")
-            st.download_button("Tải kịch bản full", "\n\n".join(st.session_state.full_script_list))
+            st.success("✅ Kịch bản 5000 chữ hoàn thành và đã lưu vào History!")
+            st.download_button("Download Full Script", "\n\n".join(st.session_state.full_script_list), file_name=f"{st.session_state.selected_topic}.md")
 
 # --- MENU 3: SEO ---
 elif menu == "3. SEO & THUMBNAIL HOÀNG GIA":
     st.header("📊 SEO & Thumbnail Strategist")
-    titles = st.text_area("Dán 10 tiêu đề mẫu:")
-    my_full_script = "\n\n".join(st.session_state.full_script_list)
-    script_area = st.text_area("Kịch bản của bạn:", value=my_full_script, height=150)
+    titles = st.text_area("Dán 10 tiêu đề đối thủ:")
+    full_script_text = "\n\n".join(st.session_state.full_script_list)
+    script_box = st.text_area("Kịch bản của bạn:", value=full_script_text, height=150)
     
-    if st.button("🚀 TẠO SEO VỚI GEMINI 3"):
+    if st.button("🚀 TẠO SEO"):
         prompt_seo = f"""
         Analyze these 10 titles: {titles}
         TASK 1: CREATE 5 NEW TITLES.
-        TASK 2: THUMBNAIL LAYOUT (Visuals + Shocking Text).
+        TASK 2: THUMBNAIL COMPOSITION (Visual brief).
         TASK 3: WRITE DESCRIPTION using THIS EXACT TEMPLATE:
         
-        [Summary based on {script_area[:500]}]
+        [Summary based on {script_box[:500]}]
         • [Keypoint 1]
         • [Keypoint 2]
         👉 Don’t miss our deep dives into royal truth and tradition
@@ -236,24 +239,24 @@ elif menu == "3. SEO & THUMBNAIL HOÀNG GIA":
         
         ENGLISH ONLY.
         """
-        st.session_state.seo_result = call_gemini_3(prompt_seo, gemini_key)
+        st.session_state.seo_result = call_ai(prompt_seo, gemini_key)
     
     if st.session_state.seo_result:
         st.markdown(st.session_state.seo_result)
 
 # --- MENU 4: LỊCH SỬ ---
 elif menu == "4. 📜 LỊCH SỬ KỊCH BẢN":
-    st.header(f"📜 {main_cat}: Lịch Sử Lưu Trữ")
+    st.header(f"📜 {main_cat}: History")
     folder = get_topic_path(main_cat)
     files = [f for f in os.listdir(folder) if f.endswith('.json')]
     if not files:
-        st.info("Chưa có kịch bản nào được lưu cho chủ đề này.")
+        st.info("Chưa có kịch bản nào.")
     else:
         for fn in sorted(files, reverse=True):
             with open(os.path.join(folder, fn), 'r', encoding='utf-8') as file:
                 data = json.load(file)
-                with st.expander(f"📅 {data['date']} | {data['topic']}"):
+                with st.expander(f"📅 {data['date']} | 🎬 {data['topic']}"):
                     st.markdown(data['content'])
-                    if st.button("Xóa bài này", key=fn):
+                    if st.button("Xóa vĩnh viễn bài này", key=fn):
                         os.remove(os.path.join(folder, fn))
                         st.rerun()
