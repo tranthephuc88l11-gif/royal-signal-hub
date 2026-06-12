@@ -6,7 +6,9 @@ import yt_dlp
 from datetime import datetime, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi
 
-# --- 1. CẤU HÌNH HỆ THỐNG LƯU TRỮ (FIX LỖI STREAMLIT CLOUD) ---
+# ============================================================
+# 1. CONFIG & STORAGE
+# ============================================================
 BASE_DATABASE = "production_database"
 os.makedirs(BASE_DATABASE, exist_ok=True)
 
@@ -20,243 +22,522 @@ TOPIC_CONFIG = {
             "https://www.youtube.com/@CrownMeltdown/videos",
             "https://www.youtube.com/@RoyalCheezee/videos",
             "https://www.youtube.com/@VintageExpose1/videos",
-            "https://www.youtube.com/@PalaceUncovered2/videos"
-        ]
+            "https://www.youtube.com/@PalaceUncovered2/videos",
+        ],
     },
     "🚀 TECH NEWS": {
         "folder": "tech_news",
-        "channels": ["https://www.youtube.com/@verge/videos"]
-    }
+        "channels": ["https://www.youtube.com/@verge/videos"],
+    },
 }
 
-# --- 2. QUẢN LÝ SESSION STATE (CHỐNG RESET DỮ LIỆU) ---
-def init_session():
-    keys = {
-        'trending_list': [], 
-        'selected_topic': "", 
-        'selected_transcript': "",
-        'outline': None, 
-        'current_part': 0, 
-        'full_script_list': [], 
-        'seo_result': ""
-    }
-    for key, value in keys.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+STEPS = [
+    "🔍  STEP 1 — SPY TRENDING",
+    "✍️  STEP 2 — REWRITE SCRIPT",
+    "📊  STEP 3 — SEO & THUMBNAIL",
+    "📜  STEP 4 — HISTORY",
+]
 
-init_session()
+# ============================================================
+# 2. SESSION STATE
+# ============================================================
+_DEFAULTS = {
+    "gemini_key": "",          # ← key stored here, not in widget
+    "trending_list": [],
+    "selected_topic": "",
+    "selected_transcript": "",
+    "outline": None,
+    "current_part": 0,
+    "full_script_list": [],
+    "seo_result": "",
+}
 
-# --- 3. CÁC HÀM TIỆN ÍCH HỆ THỐNG ---
-def get_topic_path(cat):
+for _k, _v in _DEFAULTS.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+
+# ============================================================
+# 3. HELPERS
+# ============================================================
+def get_topic_path(cat: str) -> str:
     path = os.path.join(BASE_DATABASE, TOPIC_CONFIG[cat]["folder"])
     os.makedirs(path, exist_ok=True)
     return path
 
-def call_ai(prompt, key):
-    """SỬ DỤNG DUY NHẤT GEMINI 3 FLASH PREVIEW"""
-    if not key: return "MISSING API KEY"
+
+def call_ai(prompt: str) -> str:
+    key = st.session_state.gemini_key
+    if not key:
+        return "❌ MISSING API KEY"
     genai.configure(api_key=key)
     try:
-        model = genai.GenerativeModel('gemini-3-flash-preview')
-        response = model.generate_content(prompt)
-        return response.text
+        model = genai.GenerativeModel("gemini-3-flash-preview")
+        return model.generate_content(prompt).text
     except Exception as e:
-        return f"❌ LỖI GEMINI 3: {str(e)}"
+        return f"❌ Gemini Error: {e}"
 
-def get_yt_trending(url):
-    # Lọc 7 ngày gần nhất
-    date_limit = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
+
+def get_yt_trending(url: str):
+    date_limit = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
     ydl_opts = {
-        'quiet': True, 'extract_flat': False, 'playlistend': 30,
-        'daterange': yt_dlp.utils.DateRange(start=date_limit), 'ignoreerrors': True
+        "quiet": True,
+        "extract_flat": False,
+        "playlistend": 30,
+        "daterange": yt_dlp.utils.DateRange(start=date_limit),
+        "ignoreerrors": True,
     }
     results = []
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            if info and 'entries' in info:
-                for e in info['entries']:
-                    if e and e.get('view_count', 0) >= 10000:
+            if info and "entries" in info:
+                for e in info["entries"]:
+                    if e and e.get("view_count", 0) >= 10000:
                         results.append({
-                            'title': e['title'], 'id': e['id'], 
-                            'views': e['view_count'], 'url': f"https://www.youtube.com/watch?v={e['id']}"
+                            "title": e["title"],
+                            "id": e["id"],
+                            "views": e["view_count"],
+                            "url": f"https://www.youtube.com/watch?v={e['id']}",
                         })
-    except: pass
+    except:
+        pass
     return results
 
-def get_ts_safe(v_id):
+
+def get_transcript(v_id: str) -> str:
     try:
         ts_list = YouTubeTranscriptApi.list_transcripts(v_id)
-        try: ts = ts_list.find_transcript(['en'])
-        except: ts = ts_list.find_generated_transcript(['en'])
-        return " ".join([t['text'] for t in ts.fetch()])
-    except: return ""
+        try:
+            ts = ts_list.find_transcript(["en"])
+        except:
+            ts = ts_list.find_generated_transcript(["en"])
+        return " ".join([t["text"] for t in ts.fetch()])
+    except:
+        return ""
 
-# --- 4. GIAO DIỆN STREAMLIT ---
-st.set_page_config(page_title="AI Production Hub Pro V24", page_icon="👑", layout="wide")
 
+def reset_project():
+    for k in ["trending_list", "selected_topic", "selected_transcript",
+              "outline", "current_part", "full_script_list", "seo_result"]:
+        st.session_state[k] = _DEFAULTS[k]
+    st.rerun()
+
+
+# ============================================================
+# 4. PAGE CONFIG & CSS
+# ============================================================
+st.set_page_config(
+    page_title="AI Production Hub",
+    page_icon="👑",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+[data-testid="stAppViewContainer"] { background: #0f1117; }
+[data-testid="stSidebar"] { background: #16181f; border-right: 1px solid #2a2d3a; }
+
+.hub-title {
+    font-size: 1.25rem; font-weight: 700; letter-spacing: .05em;
+    color: #f0c040; padding: 0 0 .25rem 0; margin-bottom: .5rem;
+}
+.hub-version { font-size: .7rem; color: #555; margin-top: -.4rem; margin-bottom: 1rem; }
+
+.cat-label {
+    font-size: .65rem; font-weight: 700; letter-spacing: .12em;
+    color: #888; text-transform: uppercase; margin-bottom: .2rem;
+}
+
+div[data-testid="stRadio"] label {
+    font-size: .85rem !important; color: #ccc !important;
+    padding: .35rem .5rem !important; border-radius: 6px !important;
+    display: block !important; transition: background .15s;
+}
+div[data-testid="stRadio"] label:hover { background: #1e2130 !important; }
+
+.section-header {
+    display: flex; align-items: center; gap: .6rem;
+    border-left: 3px solid #f0c040;
+    padding-left: .75rem; margin-bottom: 1.25rem;
+}
+.section-header h2 { font-size: 1.3rem; font-weight: 700; color: #f0f0f0; margin: 0; }
+.section-sub { font-size: .8rem; color: #777; margin-top: .15rem; }
+
+.progress-wrap { margin: 1rem 0 1.5rem; }
+.progress-label { font-size: .75rem; color: #888; margin-bottom: .3rem; }
+.progress-bar-bg { background: #1e2130; border-radius: 99px; height: 8px; overflow: hidden; }
+.progress-bar-fill {
+    background: linear-gradient(90deg, #f0c040, #e07b20);
+    height: 100%; border-radius: 99px; transition: width .4s ease;
+}
+
+.vcard {
+    background: #16181f; border: 1px solid #2a2d3a; border-radius: 10px;
+    padding: .85rem 1rem; margin-bottom: .6rem;
+}
+.vcard-title { font-size: .9rem; font-weight: 600; color: #eee; margin-bottom: .2rem; }
+.vcard-meta { font-size: .75rem; color: #666; }
+
+.outline-box {
+    background: #12151e; border: 1px solid #2a2d3a; border-radius: 10px;
+    padding: 1rem 1.2rem; margin-bottom: 1rem;
+}
+
+.part-chip {
+    display: inline-block; background: #1e3a5f; color: #60aaff;
+    font-size: .7rem; font-weight: 700; letter-spacing: .08em;
+    padding: .2rem .6rem; border-radius: 99px; margin-bottom: .5rem;
+    text-transform: uppercase;
+}
+
+textarea, input[type="text"], input[type="password"] {
+    background: #12151e !important; border: 1px solid #2a2d3a !important;
+    color: #eee !important; border-radius: 8px !important;
+}
+
+hr { border-color: #2a2d3a !important; margin: 1rem 0 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# 5. SIDEBAR
+# ============================================================
 with st.sidebar:
-    st.title("👑 PRODUCTION HUB")
-    gemini_key = st.text_input("Gemini API Key:", type="password", key="api_key_input")
-    
-    st.divider()
-    # THƯ MỤC MẸ
-    main_cat = st.selectbox("📂 THƯ MỤC MẸ (CATEGORY):", list(TOPIC_CONFIG.keys()), key="cat_box")
-    
-    st.divider()
-    # QUY TRÌNH CON
-    st.write("**QUY TRÌNH LÀM VIỆC:**")
-    menu = st.radio("Chọn bước:", 
-                    ["1. TÌM TRENDING (SPY)", 
-                     "2. VIẾT LẠI KỊCH BẢN", 
-                     "3. SEO & THUMBNAIL HOÀNG GIA", 
-                     "4. 📜 LỊCH SỬ KỊCH BẢN"], key="menu_radio")
-    
-    st.divider()
-    if st.button("➕ RESET DỰ ÁN MỚI"):
-        for k in ['selected_topic', 'selected_transcript', 'outline', 'current_part', 'full_script_list', 'seo_result', 'trending_list']:
-            st.session_state[k] = "" if isinstance(st.session_state.get(k), str) else (None if k=='outline' else [])
-        st.session_state.current_part = 0
-        st.rerun()
+    st.markdown('<div class="hub-title">👑 PRODUCTION HUB</div>', unsafe_allow_html=True)
+    st.markdown('<div class="hub-version">AI-Powered Script Factory · v25</div>', unsafe_allow_html=True)
 
-# --- XỬ LÝ LOGIC ---
+    # ── API KEY — lưu thẳng vào session_state
+    key_input = st.text_input(
+        "Gemini API Key", type="password", placeholder="AIza...",
+        value=st.session_state.gemini_key
+    )
+    if key_input != st.session_state.gemini_key:
+        st.session_state.gemini_key = key_input
 
-# --- MENU 1: TÌM TRENDING ---
-if menu == "1. TÌM TRENDING (SPY)":
-    st.header(f"🔍 {main_cat}: Viral Spy (7 Days / >10k views)")
-    target_channel = st.selectbox("Chọn kênh đối thủ:", TOPIC_CONFIG[main_cat]["channels"])
-    if st.button("BẮT ĐẦU QUÉT"):
-        with st.spinner("Đang thâm nhập YouTube..."):
-            st.session_state.trending_list = get_yt_trending(target_channel)
-    
-    if st.session_state.trending_list:
-        st.success(f"Tìm thấy {len(st.session_state.trending_list)} video!")
-        for v in st.session_state.trending_list:
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.write(f"🔥 **{v['title']}** ({v['views']:,} views)")
-                st.markdown(f"🔗 [Link Video]({v['url']})")
-            with col2:
-                if st.button("CHỌN", key=v['id']):
-                    st.session_state.selected_topic = v['title']
-                    st.session_state.selected_transcript = get_ts_safe(v['id'])
-                    st.success("Đã nạp video! Chuyển qua Bước 2.")
-
-# --- MENU 2: VIẾT LẠI KỊCH BẢN ---
-elif menu == "2. VIẾT LẠI KỊCH BẢN":
-    st.header(f"✍️ {main_cat}: Rewrite Master (5000 Words - Gemini 3)")
-    
-    # LUÔN HIỆN CÁC Ô NHẬP LIỆU
-    st.session_state.selected_topic = st.text_input("Project Name:", value=st.session_state.selected_topic)
-    st.session_state.selected_transcript = st.text_area("Original Transcript:", value=st.session_state.selected_transcript, height=200)
-
-    st.divider()
-
-    if st.session_state.outline is None:
-        if st.button("BƯỚC 1: LÊN DÀN Ý & PHÂN BỔ SỐ TỪ"):
-            if not gemini_key or not st.session_state.selected_transcript: 
-                st.error("Thiếu Key hoặc Transcript!")
-            else:
-                prompt_o = f"""
-                ACT AS A MASTER CONTENT CREATOR (Master of high-level retention).
-                Task: Create a detailed OUTLINE to REWRITE this script into a 5000-word viral YouTube script.
-                Category: {main_cat}
-                
-                STRICT RULES FOR OUTLINE:
-                1. DIVIDE INTO EXACTLY SIX PARTS.
-                2. ASSIGN A SPECIFIC WORD COUNT PER PART (Total must reach 5000 words).
-                3. NUMERICAL RULE: NO DIGITS AT ALL. (Example: 'three' not 3).
-                4. LANGUAGE: ENGLISH ONLY.
-                
-                Topic: {st.session_state.selected_topic}
-                Transcript: {st.session_state.selected_transcript[:3500]}
-                """
-                with st.spinner("Gemini 3 đang phân bổ số từ..."):
-                    res = call_ai(prompt_o, gemini_key)
-                    if "❌" not in res:
-                        st.session_state.outline = res
-                        st.session_state.current_part = 1
-                        st.rerun()
-                    else: st.error(res)
+    if st.session_state.gemini_key:
+        st.success("API key loaded ✅")
     else:
-        st.info(f"Dự án: {st.session_state.selected_topic} (Phần {st.session_state.current_part}/6)")
-        with st.expander("📋 Xem Dàn Ý Chi Tiết", expanded=True): st.markdown(st.session_state.outline)
-        
-        if st.session_state.current_part <= 6:
-            if st.button(f"VIẾT TIẾP PHẦN {st.session_state.current_part} (BÁM SÁT SỐ TỪ)"):
+        st.warning("Enter API key to unlock AI steps 🔑")
+
+    st.divider()
+
+    st.markdown('<div class="cat-label">Category</div>', unsafe_allow_html=True)
+    main_cat = st.selectbox(
+        "Category", list(TOPIC_CONFIG.keys()),
+        key="cat_box", label_visibility="collapsed"
+    )
+
+    st.divider()
+
+    st.markdown('<div class="cat-label">Workflow Steps</div>', unsafe_allow_html=True)
+    menu = st.radio(
+        "Steps", STEPS,
+        key="menu_radio", label_visibility="collapsed"
+    )
+
+    st.divider()
+
+    # Progress
+    part = st.session_state.current_part
+    if st.session_state.outline and 1 <= part <= 6:
+        pct = int((part - 1) / 6 * 100)
+        st.markdown(f"""
+        <div class="progress-wrap">
+            <div class="progress-label">Script Progress — Part {part-1} of 6</div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" style="width:{pct}%"></div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if st.button("↺  Reset Project", type="secondary"):
+        reset_project()
+
+
+# ============================================================
+# 6. MAIN CONTENT
+# — gemini_key đọc trực tiếp từ session_state, không cần truyền tham số
+# ============================================================
+api_ready = bool(st.session_state.gemini_key)
+
+
+# ── STEP 1: SPY TRENDING ─────────────────────────────────
+if menu == STEPS[0]:
+    st.markdown("""
+    <div class="section-header">
+        <div><h2>Viral Spy</h2>
+        <div class="section-sub">Scan competitor channels · Last 7 days · ≥ 10,000 views</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_sel, col_btn = st.columns([3, 1])
+    with col_sel:
+        target_channel = st.selectbox(
+            "Competitor channel",
+            TOPIC_CONFIG[main_cat]["channels"],
+            label_visibility="collapsed"
+        )
+    with col_btn:
+        if st.button("▶  Scan", use_container_width=True, type="primary"):
+            with st.spinner("Scanning YouTube..."):
+                st.session_state.trending_list = get_yt_trending(target_channel)
+
+    videos = st.session_state.trending_list
+    if videos:
+        st.caption(f"Found **{len(videos)}** videos matching criteria")
+        st.divider()
+        for v in videos:
+            col_info, col_act = st.columns([5, 1])
+            with col_info:
+                st.markdown(f"""
+                <div class="vcard">
+                    <div class="vcard-title">🔥 {v['title']}</div>
+                    <div class="vcard-meta">👁 {v['views']:,} views &nbsp;·&nbsp;
+                    <a href="{v['url']}" target="_blank" style="color:#60aaff">Open ↗</a></div>
+                </div>
+                """, unsafe_allow_html=True)
+            with col_act:
+                if st.button("Select", key=f"sel_{v['id']}", use_container_width=True):
+                    with st.spinner("Fetching transcript..."):
+                        st.session_state.selected_topic = v["title"]
+                        st.session_state.selected_transcript = get_transcript(v["id"])
+                    st.success("Loaded → go to Step 2")
+
+
+# ── STEP 2: REWRITE SCRIPT ───────────────────────────────
+elif menu == STEPS[1]:
+    st.markdown("""
+    <div class="section-header">
+        <div><h2>Rewrite Master</h2>
+        <div class="section-sub">6-part structure · 5,000 words · Gemini 3</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        st.session_state.selected_topic = st.text_input(
+            "Project name / topic", value=st.session_state.selected_topic
+        )
+    with c2:
+        st.session_state.selected_transcript = st.text_area(
+            "Transcript source", value=st.session_state.selected_transcript, height=120
+        )
+
+    st.divider()
+
+    # Phase A — Outline
+    if st.session_state.outline is None:
+        st.info("Step 2a — Generate outline first, then write each part.", icon="ℹ️")
+
+        can_outline = api_ready and bool(st.session_state.selected_transcript)
+        if not api_ready:
+            st.warning("Enter your Gemini API key in the sidebar first.", icon="🔑")
+
+        if st.button("Generate Outline →", type="primary", disabled=not can_outline):
+            prompt_o = f"""
+ACT AS A MASTER CONTENT CREATOR (expert in high-retention YouTube scripts).
+Task: Create a detailed OUTLINE to REWRITE this script into a 5000-word viral YouTube script.
+Category: {main_cat}
+
+STRICT RULES:
+1. Divide into EXACTLY SIX PARTS.
+2. Assign a specific word count per part (total = five thousand words).
+3. NO DIGITS — write all numbers as words (e.g. 'eight hundred' not 800).
+4. ENGLISH ONLY.
+
+Topic: {st.session_state.selected_topic}
+Transcript: {st.session_state.selected_transcript[:3500]}
+"""
+            with st.spinner("Generating outline..."):
+                res = call_ai(prompt_o)
+                if "❌" not in res:
+                    st.session_state.outline = res
+                    st.session_state.current_part = 1
+                    st.rerun()
+                else:
+                    st.error(res)
+
+    # Phase B — Write parts
+    else:
+        curr = st.session_state.current_part
+
+        with st.expander("📋 View Outline", expanded=(curr == 1)):
+            st.markdown(
+                f'<div class="outline-box">{st.session_state.outline}</div>',
+                unsafe_allow_html=True
+            )
+
+        st.divider()
+
+        if curr <= 6:
+            col_status, col_action = st.columns([3, 1])
+            with col_status:
+                st.markdown(f'<div class="part-chip">Part {curr} / 6</div>', unsafe_allow_html=True)
+                st.progress(int((curr - 1) / 6 * 100) / 100)
+            with col_action:
+                write_btn = st.button(
+                    f"Write Part {curr} →",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=not api_ready
+                )
+
+            if write_btn:
                 prompt_w = f"""
-                OUTLINE REFERENCE: {st.session_state.outline}. 
-                TASK: Write PART {st.session_state.current_part} of the script in ENGLISH ONLY. 
-                
-                STRICT REQUIREMENTS:
-                1. WORD COUNT: Refer to the outline above. Write deeply to reach the word count allocated for this part.
-                2. NO DIGITS: ABSOLUTELY NO NUMBERS AS DIGITS. (Example: 'twenty-twenty-four' not 2024).
-                3. STYLE: Dramatic, high-stakes storytelling, Royal expert tone.
-                """
-                with st.spinner(f"Gemini 3 đang viết phần {st.session_state.current_part}..."):
-                    res_part = call_ai(prompt_w, gemini_key)
-                    if "❌" not in res_part:
-                        st.session_state.full_script_list.append(f"## PART {st.session_state.current_part}\n\n{res_part}")
-                        if st.session_state.current_part == 6:
-                            # Tự động lưu theo thư mục mẹ
+You are a master YouTube scriptwriter specializing in royal drama and high-retention content.
+
+FULL OUTLINE:
+{st.session_state.outline}
+
+TASK: Write PART {curr} of 6 for the script about: "{st.session_state.selected_topic}"
+
+REQUIREMENTS:
+1. Write ONLY Part {curr} — do not write other parts.
+2. Follow the word count assigned to Part {curr} in the outline above (around 800 words).
+3. NO DIGITS — all numbers must be written as words (e.g. 'twenty-twenty-five' not 2025).
+4. ENGLISH ONLY.
+5. Style: cinematic, dramatic, high-stakes storytelling.
+6. PURE NARRATION ONLY — no image suggestions, no B-roll notes, no [visual], no [cut to], no stage directions, no brackets of any kind. Just the spoken script text.
+"""
+                with st.spinner(f"Writing Part {curr}..."):
+                    result = call_ai(prompt_w)
+                    if "❌" not in result:
+                        st.session_state.full_script_list.append(
+                            f"## PART {curr}\n\n{result}"
+                        )
+                        if curr == 6:
                             path = get_topic_path(main_cat)
-                            f_name = f"{path}/{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-                            with open(f_name, 'w', encoding='utf-8') as f:
-                                json.dump({"date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "topic": st.session_state.selected_topic, "content": "\n\n".join(st.session_state.full_script_list)}, f, ensure_ascii=False, indent=4)
+                            fname = f"{path}/{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                            with open(fname, "w", encoding="utf-8") as f:
+                                json.dump({
+                                    "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                    "topic": st.session_state.selected_topic,
+                                    "content": "\n\n".join(st.session_state.full_script_list),
+                                }, f, ensure_ascii=False, indent=4)
                         st.session_state.current_part += 1
                         st.rerun()
-                    else: st.error(res_part)
+                    else:
+                        st.error(result)
 
-        for p in st.session_state.full_script_list: st.markdown(p); st.divider()
-        if st.session_state.current_part > 6:
-            st.success("✅ Kịch bản 5000 chữ hoàn thành và đã lưu vào History!")
-            st.download_button("Download Full Script", "\n\n".join(st.session_state.full_script_list), file_name=f"{st.session_state.selected_topic}.md")
+        if st.session_state.full_script_list:
+            st.divider()
+            st.caption(f"Written so far — {len(st.session_state.full_script_list)} part(s)")
+            for p in st.session_state.full_script_list:
+                st.markdown(p)
+                st.divider()
 
-# --- MENU 3: SEO ---
-elif menu == "3. SEO & THUMBNAIL HOÀNG GIA":
-    st.header("📊 SEO & Thumbnail Strategist")
-    titles = st.text_area("Dán 10 tiêu đề đối thủ:")
-    full_script_text = "\n\n".join(st.session_state.full_script_list)
-    script_box = st.text_area("Kịch bản của bạn:", value=full_script_text, height=150)
-    
-    if st.button("🚀 TẠO SEO"):
+        if curr > 6:
+            st.success("✅ All 6 parts complete — script saved to History.")
+            st.download_button(
+                "⬇  Download Full Script (.md)",
+                "\n\n".join(st.session_state.full_script_list),
+                file_name=f"{st.session_state.selected_topic or 'script'}.md",
+                mime="text/markdown",
+                type="primary",
+            )
+
+
+# ── STEP 3: SEO & THUMBNAIL ──────────────────────────────
+elif menu == STEPS[2]:
+    st.markdown("""
+    <div class="section-header">
+        <div><h2>SEO & Thumbnail</h2>
+        <div class="section-sub">5 titles · thumbnail brief · full description</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not api_ready:
+        st.warning("Enter your Gemini API key in the sidebar first.", icon="🔑")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        titles = st.text_area(
+            "Paste 10 competitor titles here",
+            height=200, placeholder="Paste titles, one per line..."
+        )
+    with col_b:
+        script_box = st.text_area(
+            "Your script (auto-filled from Step 2)",
+            value="\n\n".join(st.session_state.full_script_list),
+            height=200,
+        )
+
+    st.divider()
+
+    if st.button("🚀  Generate SEO Package", type="primary", disabled=not api_ready):
         prompt_seo = f"""
-        Analyze these 10 titles: {titles}
-        TASK 1: CREATE 5 NEW TITLES.
-        TASK 2: THUMBNAIL COMPOSITION (Visual brief).
-        TASK 3: WRITE DESCRIPTION using THIS EXACT TEMPLATE:
-        
-        [Summary based on {script_box[:500]}]
-        • [Keypoint 1]
-        • [Keypoint 2]
-        👉 Don’t miss our deep dives into royal truth and tradition
-        Subscribe: https://www.youtube.com/@RoyalSignal-1
-        and turn on the bell for more royal stories!
-        
-        📍 Disclaimer
-        Independent commentary and analysis for discussion. We do not verify allegations. Context is examined under YouTube Fair Use.
-        #KateMiddleton #QueenCamilla #RoyalNews #BreakingNews #PrincessOfWales #RoyalFamily #HouseOfWindsor #RoyalExpert #KingCharlesIII #BritishMonarchy
-        
-        ENGLISH ONLY.
-        """
-        st.session_state.seo_result = call_ai(prompt_seo, gemini_key)
-    
-    if st.session_state.seo_result:
-        st.markdown(st.session_state.seo_result)
+Analyze these competitor titles:
+{titles}
 
-# --- MENU 4: LỊCH SỬ ---
-elif menu == "4. 📜 LỊCH SỬ KỊCH BẢN":
-    st.header(f"📜 {main_cat}: History")
+TASK 1 — TITLES: Create 5 new viral titles following the same emotional pattern.
+TASK 2 — THUMBNAIL: Write a thumbnail composition brief (main visual, text overlay, color mood).
+TASK 3 — DESCRIPTION: Write using this exact template:
+
+[2-3 dramatic sentence summary based on: {script_box[:500]}]
+• [Key point 1]
+• [Key point 2]
+• [Key point 3]
+👉 Don't miss our deep dives into royal truth and tradition
+Subscribe: https://www.youtube.com/@RoyalSignal-1 and turn on the bell!
+
+📍 Disclaimer
+Independent commentary and analysis for discussion. We do not verify allegations. Examined under YouTube Fair Use.
+#KateMiddleton #QueenCamilla #RoyalNews #BreakingNews #PrincessOfWales #RoyalFamily #HouseOfWindsor #RoyalExpert #KingCharlesIII #BritishMonarchy
+
+ENGLISH ONLY.
+"""
+        with st.spinner("Generating SEO package..."):
+            st.session_state.seo_result = call_ai(prompt_seo)
+
+    if st.session_state.seo_result:
+        st.divider()
+        st.markdown(st.session_state.seo_result)
+        st.download_button(
+            "⬇  Download SEO Package",
+            st.session_state.seo_result,
+            file_name="seo_package.txt",
+            mime="text/plain",
+        )
+
+
+# ── STEP 4: HISTORY ──────────────────────────────────────
+elif menu == STEPS[3]:
+    st.markdown(f"""
+    <div class="section-header">
+        <div><h2>Script History</h2>
+        <div class="section-sub">{main_cat} · Saved scripts</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
     folder = get_topic_path(main_cat)
-    files = [f for f in os.listdir(folder) if f.endswith('.json')]
+    files = sorted([f for f in os.listdir(folder) if f.endswith(".json")], reverse=True)
+
     if not files:
-        st.info("Chưa có kịch bản nào.")
+        st.info(f"No scripts saved yet for **{main_cat}**.", icon="📂")
     else:
-        for fn in sorted(files, reverse=True):
-            with open(os.path.join(folder, fn), 'r', encoding='utf-8') as file:
-                data = json.load(file)
-                with st.expander(f"📅 {data['date']} | 🎬 {data['topic']}"):
-                    st.markdown(data['content'])
-                    if st.button("Xóa vĩnh viễn bài này", key=fn):
-                        os.remove(os.path.join(folder, fn))
-                        st.rerun()
+        st.caption(f"{len(files)} script(s) saved")
+        for fn in files:
+            fpath = os.path.join(folder, fn)
+            with open(fpath, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+
+            col_exp, col_dl, col_del = st.columns([6, 1, 1])
+            with col_exp:
+                with st.expander(f"📅 {data['date']}  ·  🎬 {data['topic']}"):
+                    st.markdown(data["content"])
+            with col_dl:
+                st.download_button(
+                    "⬇", data["content"],
+                    file_name=f"{data['topic']}.md",
+                    mime="text/markdown",
+                    key=f"dl_{fn}",
+                    use_container_width=True,
+                )
+            with col_del:
+                if st.button("🗑", key=f"del_{fn}", use_container_width=True):
+                    os.remove(fpath)
+                    st.toast("Deleted.")
+                    st.rerun()
