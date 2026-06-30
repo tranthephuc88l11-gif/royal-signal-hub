@@ -355,13 +355,34 @@ if menu == STEPS[0]:
     section_header("Viral Spy", f"{st.session_state.active_channel} · Last 7 days · ≥ 10,000 views")
 
     channels = NNT_CHANNELS if is_nnt else ROYAL_CHANNELS
-    col_sel, col_btn = st.columns([3, 1])
+
+    col_mode, col_sel, col_btn = st.columns([1.3, 2.5, 1])
+    with col_mode:
+        scan_mode = st.radio("Mode", ["All channels", "Single channel"],
+                             label_visibility="collapsed", horizontal=False)
     with col_sel:
-        target = st.selectbox("Channel", channels, label_visibility="collapsed")
+        if scan_mode == "Single channel":
+            target = st.selectbox("Channel", channels, label_visibility="collapsed")
+        else:
+            st.caption(f"Will scan all **{len(channels)}** channels in {st.session_state.active_channel}")
     with col_btn:
         if st.button("▶  Scan", type="primary", use_container_width=True):
-            with st.spinner("Scanning YouTube..."):
-                st.session_state.trending_list = get_yt_trending(target)
+            if scan_mode == "Single channel":
+                with st.spinner("Scanning YouTube..."):
+                    st.session_state.trending_list = get_yt_trending(target)
+            else:
+                all_results = []
+                progress = st.progress(0)
+                status = st.empty()
+                for i, ch in enumerate(channels):
+                    status.text(f"Scanning {i+1}/{len(channels)}: {ch}")
+                    all_results.extend(get_yt_trending(ch))
+                    progress.progress((i + 1) / len(channels))
+                status.empty()
+                progress.empty()
+                # Sort by views, descending
+                all_results.sort(key=lambda v: v["views"], reverse=True)
+                st.session_state.trending_list = all_results
 
     if st.session_state.trending_list:
         st.caption(f"Found **{len(st.session_state.trending_list)}** videos")
