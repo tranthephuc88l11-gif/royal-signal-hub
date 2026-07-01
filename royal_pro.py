@@ -126,12 +126,14 @@ def call_ai(prompt: str) -> str:
         return f"❌ Gemini Error: {e}"
 
 
-def get_yt_trending(url: str):
-    date_limit = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
+def get_yt_trending(url: str, days: int = 7, min_views: int = 5000):
+    cutoff = datetime.now() - timedelta(days=days)
     ydl_opts = {
-        "quiet": True, "extract_flat": False, "playlistend": 30,
-        "daterange": yt_dlp.utils.DateRange(start=date_limit),
+        "quiet": True,
+        "extract_flat": False,
+        "playlistend": 50,          # lấy nhiều hơn để filter sau
         "ignoreerrors": True,
+        "no_warnings": True,
     }
     results = []
     try:
@@ -139,15 +141,29 @@ def get_yt_trending(url: str):
             info = ydl.extract_info(url, download=False)
             if info and "entries" in info:
                 for e in info["entries"]:
-                    if e and e.get("view_count", 0) >= 10000:
-                        results.append({
-                            "title": e["title"], "id": e["id"],
-                            "views": e["view_count"],
-                            "comments": e.get("comment_count", 0) or 0,
-                            "url": f"https://www.youtube.com/watch?v={e['id']}",
-                            "channel": e.get("uploader", "Unknown"),
-                            "upload_date": e.get("upload_date", ""),
-                        })
+                    if not e:
+                        continue
+                    # Filter ngày thủ công
+                    upload_date = e.get("upload_date", "")
+                    if upload_date and len(upload_date) == 8:
+                        try:
+                            upload_dt = datetime.strptime(upload_date, "%Y%m%d")
+                            if upload_dt < cutoff:
+                                continue
+                        except:
+                            pass
+                    # Filter views
+                    if e.get("view_count", 0) < min_views:
+                        continue
+                    results.append({
+                        "title": e.get("title", "Unknown"),
+                        "id": e.get("id", ""),
+                        "views": e.get("view_count", 0),
+                        "comments": e.get("comment_count", 0) or 0,
+                        "url": f"https://www.youtube.com/watch?v={e.get('id','')}",
+                        "channel": e.get("uploader", "Unknown"),
+                        "upload_date": upload_date,
+                    })
     except:
         pass
     return results
@@ -448,33 +464,54 @@ if menu == STEPS[0]:
 
     channels = NNT_CHANNELS if is_nnt else ROYAL_CHANNELS
 
-    col_mode, col_sel, col_btn = st.columns([1.3, 2.5, 1])
-    with col_mode:
+    # Settings row
+    cfg1, cfg2, cfg3 = st.columns([1.5, 1.5, 1])
+    with cfg1:
         scan_mode = st.radio("Mode", ["All channels", "Single channel"],
-                             label_visibility="collapsed", horizontal=False)
+                             horizontal=True, label_visibility="collapsed")
+    with cfg2:
+        min_views = st.select_slider(
+            "Min views", options=[10000, 20000, 50000, 100000],
+            value=10000, label_visibility="collapsed",
+            format_func=lambda x: f"≥ {x:,} views"
+        )
+    with cfg3:
+        days_back = st.select_slider(
+            "Days", options=[3, 7, 14, 30],
+            value=7, label_visibility="collapsed",
+            format_func=lambda x: f"Last {x}d"
+        )
+
+    col_sel, col_btn = st.columns([3, 1])
     with col_sel:
         if scan_mode == "Single channel":
             target = st.selectbox("Channel", channels, label_visibility="collapsed")
         else:
-            st.caption(f"Will scan all **{len(channels)}** channels in {st.session_state.active_channel}")
+            st.caption(f"Scanning all **{len(channels)}** channels · last {days_back} days · ≥ {min_views:,} views")
     with col_btn:
         if st.button("▶  Scan", type="primary", use_container_width=True):
             if scan_mode == "Single channel":
-                with st.spinner("Scanning YouTube..."):
-                    st.session_state.trending_list = get_yt_trending(target)
+                with st.spinner("Scanning..."):
+                    st.session_state.trending_list = get_yt_trending(target, days=days_back, min_views=min_views)
             else:
                 all_results = []
                 progress = st.progress(0)
                 status = st.empty()
                 for i, ch in enumerate(channels):
-                    status.text(f"Scanning {i+1}/{len(channels)}: {ch}")
-                    all_results.extend(get_yt_trending(ch))
+                    status.text(f"Scanning {i+1}/{len(channels)}: {ch.split('/')[-2]}")
+                    all_results.extend(get_yt_trending(ch, days=days_back, min_views=min_views))
                     progress.progress((i + 1) / len(channels))
                 status.empty()
                 progress.empty()
-                # Sort by views, descending
-                all_results.sort(key=lambda v: v["views"], reverse=True)
-                st.session_state.trending_list = all_results
+                # Deduplicate by video id
+                seen = set()
+                unique = []
+                for v in all_results:
+                    if v["id"] not in seen:
+                        seen.add(v["id"])
+                        unique.append(v)
+                unique.sort(key=lambda v: v["views"], reverse=True)
+                st.session_state.trending_list = unique
 
     if st.session_state.trending_list:
         videos = st.session_state.trending_list
