@@ -1,4 +1,5 @@
 streamlit
 google-generativeai
 yt-dlp
-youtube_transcript_api
+youtube-transcript-api
+openpyxl
