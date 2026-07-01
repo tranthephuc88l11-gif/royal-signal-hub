@@ -131,9 +131,13 @@ def get_yt_trending(url: str, days: int = 7, min_views: int = 5000):
     ydl_opts = {
         "quiet": True,
         "extract_flat": False,
-        "playlistend": 50,          # lấy nhiều hơn để filter sau
+        "playlistend": 50,
         "ignoreerrors": True,
         "no_warnings": True,
+        "nocheckcertificate": True,
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        },
     }
     results = []
     try:
