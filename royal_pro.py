@@ -2,9 +2,15 @@ import streamlit as st
 import google.generativeai as genai
 import json
 import os
+import io
+import re
+from collections import Counter
 import yt_dlp
 from datetime import datetime, timedelta
 from youtube_transcript_api import YouTubeTranscriptApi
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 # ============================================================
 # 1. CONFIG & STORAGE
@@ -137,11 +143,97 @@ def get_yt_trending(url: str):
                         results.append({
                             "title": e["title"], "id": e["id"],
                             "views": e["view_count"],
+                            "comments": e.get("comment_count", 0) or 0,
                             "url": f"https://www.youtube.com/watch?v={e['id']}",
+                            "channel": e.get("uploader", "Unknown"),
+                            "upload_date": e.get("upload_date", ""),
                         })
     except:
         pass
     return results
+
+
+STOPWORDS = set("""
+a an the and or but for nor so yet of in on at to from by with as is are was were
+be been being this that these those it its his her their our your my i you he she
+we they will would can could should shall may might must do does did not no
+""".split())
+
+
+def extract_trending_keywords(videos, top_n=20):
+    word_counter = Counter()
+    phrase_counter = Counter()
+    for v in videos:
+        title = v["title"].lower()
+        title_clean = re.sub(r"[^a-z0-9\s]", " ", title)
+        words = [w for w in title_clean.split() if len(w) > 2 and w not in STOPWORDS]
+        word_counter.update(words)
+        for i in range(len(words) - 1):
+            phrase_counter[f"{words[i]} {words[i+1]}"] += 1
+    top_words = word_counter.most_common(top_n)
+    top_phrases = [p for p in phrase_counter.most_common(top_n) if p[1] > 1]
+    return top_words, top_phrases
+
+
+def export_videos_to_excel(videos, channel_name):
+    wb = Workbook()
+
+    # Sheet 1: Videos
+    ws = wb.active
+    ws.title = "Videos"
+    headers = ["Title", "Channel", "Views", "Comments", "Upload Date", "Video URL"]
+    ws.append(headers)
+    for col in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=col)
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", start_color="1F2937")
+        c.alignment = Alignment(horizontal="center")
+
+    for v in videos:
+        upload_fmt = v.get("upload_date", "")
+        if upload_fmt and len(upload_fmt) == 8:
+            upload_fmt = f"{upload_fmt[:4]}-{upload_fmt[4:6]}-{upload_fmt[6:]}"
+        ws.append([
+            v["title"], v.get("channel", ""), v["views"],
+            v.get("comments", 0), upload_fmt, v["url"],
+        ])
+
+    widths = [55, 22, 12, 12, 14, 45]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A2"
+
+    # Sheet 2: Trending Keywords
+    ws2 = wb.create_sheet("Trending Keywords")
+    top_words, top_phrases = extract_trending_keywords(videos)
+
+    ws2["A1"] = "Top Keywords (single words)"
+    ws2["A1"].font = Font(bold=True, size=12)
+    ws2.append(["Keyword", "Frequency"])
+    for c in ws2[2]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", start_color="1F2937")
+    for word, count in top_words:
+        ws2.append([word, count])
+
+    start_row = len(top_words) + 4
+    ws2.cell(row=start_row, column=1, value="Top Keyword Phrases (2-word combos)").font = Font(bold=True, size=12)
+    ws2.cell(row=start_row + 1, column=1, value="Phrase")
+    ws2.cell(row=start_row + 1, column=2, value="Frequency")
+    for c in ws2[start_row + 1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", start_color="1F2937")
+    for i, (phrase, count) in enumerate(top_phrases):
+        ws2.cell(row=start_row + 2 + i, column=1, value=phrase)
+        ws2.cell(row=start_row + 2 + i, column=2, value=count)
+
+    ws2.column_dimensions["A"].width = 35
+    ws2.column_dimensions["B"].width = 14
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
 
 def get_transcript(v_id: str) -> str:
@@ -385,15 +477,28 @@ if menu == STEPS[0]:
                 st.session_state.trending_list = all_results
 
     if st.session_state.trending_list:
-        st.caption(f"Found **{len(st.session_state.trending_list)}** videos")
+        videos = st.session_state.trending_list
+        col_count, col_export = st.columns([4, 1])
+        with col_count:
+            st.caption(f"Found **{len(videos)}** videos")
+        with col_export:
+            excel_buf = export_videos_to_excel(videos, st.session_state.active_channel)
+            st.download_button(
+                "📊  Export to Excel",
+                data=excel_buf,
+                file_name=f"trending_{channel_tag}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
         st.divider()
-        for v in st.session_state.trending_list:
+        for v in videos:
             col_info, col_act = st.columns([5, 1])
             with col_info:
                 st.markdown(f"""
                 <div class="vcard">
                     <div class="vcard-title">🔥 {v['title']}</div>
                     <div class="vcard-meta">👁 {v['views']:,} views &nbsp;·&nbsp;
+                    💬 {v.get('comments', 0):,} comments &nbsp;·&nbsp;
                     <a href="{v['url']}" target="_blank" style="color:{accent}">Open ↗</a></div>
                 </div>
                 """, unsafe_allow_html=True)
