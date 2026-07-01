@@ -486,28 +486,48 @@ if menu == STEPS[0]:
             format_func=lambda x: f"Last {x}d"
         )
 
-    col_sel, col_btn = st.columns([3, 1])
-    with col_sel:
-        if scan_mode == "Single channel":
-            target = st.selectbox("Channel", channels, label_visibility="collapsed")
-        else:
-            st.caption(f"Scanning all **{len(channels)}** channels · last {days_back} days · ≥ {min_views:,} views")
+    # Channel selector
+    if scan_mode == "All channels":
+        selected_channels = channels
+        st.caption(f"Scanning all **{len(channels)}** channels · last {days_back} days · ≥ {min_views:,} views")
+    else:
+        # Hiển thị tên kênh thay vì URL đầy đủ
+        channel_labels = [ch.split("@")[-1].replace("/videos", "") if "@" in ch 
+                         else ch.split("channel/")[-1].replace("/videos", "")[:20] 
+                         for ch in channels]
+        label_to_url = dict(zip(channel_labels, channels))
+        selected_labels = st.multiselect(
+            "Chọn kênh muốn quét:",
+            options=channel_labels,
+            default=channel_labels[:5],
+            placeholder="Chọn 1 hoặc nhiều kênh..."
+        )
+        selected_channels = [label_to_url[l] for l in selected_labels]
+        if selected_channels:
+            st.caption(f"Đã chọn **{len(selected_channels)}** kênh · last {days_back} days · ≥ {min_views:,} views")
+
+    col_btn, _ = st.columns([1, 3])
     with col_btn:
+        scan_disabled = not selected_channels if scan_mode == "Custom" else False
         if st.button("▶  Scan", type="primary", use_container_width=True):
-            if scan_mode == "Single channel":
-                with st.spinner("Scanning..."):
-                    st.session_state.trending_list = get_yt_trending(target, days=days_back, min_views=min_views)
+            if not selected_channels:
+                st.warning("Chọn ít nhất 1 kênh để quét.")
+            elif len(selected_channels) == 1:
+                with st.spinner(f"Scanning {selected_channels[0].split('@')[-1]}..."):
+                    st.session_state.trending_list = get_yt_trending(
+                        selected_channels[0], days=days_back, min_views=min_views
+                    )
             else:
                 all_results = []
                 progress = st.progress(0)
                 status = st.empty()
-                for i, ch in enumerate(channels):
-                    status.text(f"Scanning {i+1}/{len(channels)}: {ch.split('/')[-2]}")
+                for i, ch in enumerate(selected_channels):
+                    ch_name = ch.split("@")[-1].replace("/videos","") if "@" in ch else ch.split("/")[-2]
+                    status.text(f"Scanning {i+1}/{len(selected_channels)}: {ch_name}")
                     all_results.extend(get_yt_trending(ch, days=days_back, min_views=min_views))
-                    progress.progress((i + 1) / len(channels))
+                    progress.progress((i + 1) / len(selected_channels))
                 status.empty()
                 progress.empty()
-                # Deduplicate by video id
                 seen = set()
                 unique = []
                 for v in all_results:
